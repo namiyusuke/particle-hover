@@ -11,8 +11,22 @@ import fragmentShaderPosition from "./shader/simFragmentPosition.glsl";
 import PoissonDiskSampling from "poisson-disk-sampling";
 const t1 = "/1.jpg";
 const t2 = "/2.png";
-let COUNT = 1032;
+let COUNT = 250;
 let TEXTURE_WIDTH = COUNT ** 2;
+
+// public/ 内の全 GLB。label が index.html の .word と、shape が data-shape と対応する。
+const MODELS = [
+  { shape: "asano", label: "ASANO", url: "/asano.glb" },
+  { shape: "daijima", label: "DAIJIMA", url: "/daijima.glb" },
+  { shape: "funahashi", label: "FUNAHASHI", url: "/funahashi.glb" },
+  { shape: "hara", label: "HARA", url: "/hara.glb" },
+  { shape: "hasegawa", label: "HASEGAWA", url: "/hasegawa.glb" },
+  { shape: "ikeda", label: "IKEDA", url: "/ikeda.glb" },
+  { shape: "minato", label: "MINATO", url: "/minato.glb" },
+  { shape: "nakagawa", label: "NAKAGAWA", url: "/nakagawa.glb" },
+  { shape: "nenoki", label: "NENOKI", url: "/nenoki.glb" },
+  { shape: "yamamoto", label: "YAMAMOTO", url: "/yamamoto.glb" },
+];
 
 // 画像を読み込んで HTMLImageElement を返す
 function load(url) {
@@ -66,40 +80,6 @@ function spherePoints(count, radius = 0.5) {
   return arr;
 }
 
-// 立方体の表面（6面）に分布
-function boxPoints(count, size = 0.5) {
-  const arr = new Float32Array(count * 3);
-  for (let i = 0; i < count; i++) {
-    const a = Math.random() * 2 - 1;
-    const b = Math.random() * 2 - 1;
-    const face = (Math.random() * 6) | 0;
-    let x, y, z;
-    if (face === 0) [x, y, z] = [1, a, b];
-    else if (face === 1) [x, y, z] = [-1, a, b];
-    else if (face === 2) [x, y, z] = [a, 1, b];
-    else if (face === 3) [x, y, z] = [a, -1, b];
-    else if (face === 4) [x, y, z] = [a, b, 1];
-    else [x, y, z] = [a, b, -1];
-    arr[i * 3 + 0] = x * size;
-    arr[i * 3 + 1] = y * size;
-    arr[i * 3 + 2] = z * size;
-  }
-  return arr;
-}
-
-// トーラス（ドーナツ）の表面に分布
-function torusPoints(count, R = 0.35, r = 0.15) {
-  const arr = new Float32Array(count * 3);
-  for (let i = 0; i < count; i++) {
-    const u = Math.random() * 2 * Math.PI; // 大円まわり
-    const v = Math.random() * 2 * Math.PI; // 断面まわり
-    arr[i * 3 + 0] = (R + r * Math.cos(v)) * Math.cos(u);
-    arr[i * 3 + 1] = (R + r * Math.cos(v)) * Math.sin(u);
-    arr[i * 3 + 2] = r * Math.sin(v);
-  }
-  return arr;
-}
-
 // GLB(glTF)のメッシュ表面から点群(Float32Array [x,y,z, ...])を生成する。
 // モデル内の全メッシュをワールド変換して結合し、表面積に応じて一様サンプリングする。
 async function glbPoints(url, count) {
@@ -149,7 +129,7 @@ export default class Sketch {
     this.renderer = new THREE.WebGLRenderer();
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(this.width, this.height);
-    this.renderer.setClearColor(0xeeeeee, 1);
+    this.renderer.setClearColor(0x000000, 1);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -175,13 +155,16 @@ export default class Sketch {
 
   // アセット読み込み完了を待ってから初期化する
   async init() {
-    // 初期位置=球、ターゲット=GLBモデルの表面。クリックで 球 ⇔ GLB。
+    // 初期位置=球。ホバーで各 GLB モデルの表面へ切り替わる。
     this.points1 = spherePoints(TEXTURE_WIDTH);
-    [this.points2, this.points3, this.points4] = await Promise.all([
-      glbPoints("/sample.glb", TEXTURE_WIDTH),
-      glbPoints("/sample2.glb", TEXTURE_WIDTH),
-      glbPoints("/sample3.glb", TEXTURE_WIDTH),
-    ]);
+    // 全 GLB の点群を並列生成し、shape 名 → 点群 のマップにする
+    const modelPoints = await Promise.all(MODELS.map((m) => glbPoints(m.url, TEXTURE_WIDTH)));
+    this.modelPoints = {};
+    MODELS.forEach((m, i) => {
+      this.modelPoints[m.shape] = modelPoints[i];
+    });
+    // 初期ターゲット（クリック切り替え用の B）に使う最初のモデル
+    this.points2 = modelPoints[0];
 
     await this.loadAssets();
     this.addObjects();
@@ -199,17 +182,13 @@ export default class Sketch {
 
   // 各テキストに形状(点群)を紐づけ、ホバーでその形状にパーティクルを切り替える
   setupTextHover() {
-    // ラベル名 → 点群。model は sample.glb、他は幾何形状。
+    // ラベル名 → 点群。各 GLB モデルに対応する。
     const shapes = {
-      model: this.points2, // /sample.glb（init で読み込み済み）
-      model2: this.points3, // /sample2.glb（init で読み込み済み）
-      model3: this.points4, // /sample3.glb（init で読み込み済み）
-      sphere: this.points1, // 球（init で生成済み）
-      box: boxPoints(TEXTURE_WIDTH),
-      torus: torusPoints(TEXTURE_WIDTH),
+      ...this.modelPoints, // 全 GLB（init で読み込み済み）
     };
 
-    const words = document.querySelectorAll(".word");
+    // index.html の .word ラベルと about.html のメンバー一覧、両方の data-shape に対応
+    const words = document.querySelectorAll("[data-shape]");
     words.forEach((el) => {
       const points = shapes[el.dataset.shape];
       if (!points) return;

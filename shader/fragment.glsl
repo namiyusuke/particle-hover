@@ -4,7 +4,7 @@ varying vec2 vUv;
 varying vec3 vPosition;
 
 void main() {
-   vec3 color = vec3(.2);
+   vec3 color = vec3(1.);
   // 円形のポイントにする
 
   float alpha =1.- length(gl_PointCoord.xy - 0.5) * 2.;
