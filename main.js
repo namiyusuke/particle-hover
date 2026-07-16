@@ -126,14 +126,28 @@ export default class Sketch {
     this.container = options.dom;
     this.width = this.container.offsetWidth;
     this.height = this.container.offsetHeight;
-    this.renderer = new THREE.WebGLRenderer();
+    this.renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(this.width, this.height);
-    this.renderer.setClearColor(0x000000, 1);
+    this.renderer.setClearColor(0x000000, 0); // 透過。カード以外は下のページが見える
+    this.renderer.autoClear = false; // clear をフレームごとに手動制御（scissor と併用）
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     this.container.appendChild(this.renderer.domElement);
+
+    // ホバー中の対象。activeEl=ホバー要素 / activeBox=描画を収めるカードの枠（無ければ全画面）
+    this.activeEl = null;
+    this.activeBox = null;
+
+    // マウス位置（ホバー方向にモデルを少し傾けるため）
+    this.mouseX = 0;
+    this.mouseY = 0;
+    this.pointer = { x: 0, y: 0 }; // カード中心を基準にした -1〜1 の平滑化値
+    window.addEventListener("mousemove", (e) => {
+      this.mouseX = e.clientX;
+      this.mouseY = e.clientY;
+    });
 
     this.camera = new THREE.PerspectiveCamera(70, this.width / this.height, 0.01, 1000);
 
@@ -196,8 +210,20 @@ export default class Sketch {
       el.addEventListener("mouseenter", () => {
         fillPositionTexture(this.dynamicTarget, points); // 動的ターゲットを紐づけ形状に更新
         this.setTarget(this.dynamicTarget);
+        this.activeEl = el;
+        this.activeBox = el.querySelector(".img"); // カード内の写真枠。無ければ全画面表示
         words.forEach((w) => w.classList.remove("active"));
-        el.classList.add("active");
+        el.classList.add("active"); // 写真をフェードアウト（CSS 側）
+      });
+
+      // ホバーを外したら写真を戻し、パーティクルも待機状態（球）へ戻す
+      el.addEventListener("mouseleave", () => {
+        el.classList.remove("active");
+        this.setTarget(this.baseTarget);
+        if (this.activeEl === el) {
+          this.activeEl = null; // 何もホバーしていない間は描画しない（背景を消す）
+          this.activeBox = null;
+        }
       });
     });
   }
@@ -278,7 +304,7 @@ export default class Sketch {
 
     // クリックで切り替えるための2つのターゲット
     this.targets = [dtTargetA, dtTargetB];
-    this.baseIndex = 1; // 通常時は B へ向かう（初期位置が A のため）
+    this.baseIndex = 0; // 待機時は球（A=points1）。ホバー時だけ GLB 形状が現れる
     this.baseTarget = this.targets[this.baseIndex]; // ホバーを離したら戻る先
 
     this.velocityVariable = this.gpuCompute.addVariable("textureVelocity", fragmentShaderVelocity, dtVelocity);
@@ -361,8 +387,46 @@ export default class Sketch {
     // 2. 計算後の最新の位置テクスチャを描画シェーダーへ渡す
     this.material.uniforms.uPositions.value = this.gpuCompute.getCurrentRenderTarget(this.positionVariable).texture;
 
-    // 3. 描画して次フレームを予約
-    this.renderer.render(this.scene, this.camera);
+    // 3. 描画。まず画面全体を透明にクリアし、ホバー中だけ対象領域に描く
+    const r = this.renderer;
+    r.setScissorTest(false);
+    r.clear();
+
+    if (this.activeEl) {
+      if (this.activeBox) {
+        // カードの写真枠だけに切り抜いて描画（＝カードの中にパーティクルが出る）
+        const rect = this.activeBox.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          const x = rect.left;
+          const y = window.innerHeight - rect.bottom; // WebGL は左下原点なので上下反転
+          r.setViewport(x, y, rect.width, rect.height);
+          r.setScissor(x, y, rect.width, rect.height);
+          r.setScissorTest(true);
+          this.camera.aspect = rect.width / rect.height; // カードの縦横比に合わせる
+          this.camera.updateProjectionMatrix();
+
+          // カード内でのマウス位置(-1〜1)に応じてモデルをカーソル方向へ少し傾ける
+          const nx = Math.max(-1, Math.min(1, (this.mouseX - (rect.left + rect.width / 2)) / (rect.width / 2)));
+          const ny = Math.max(-1, Math.min(1, (this.mouseY - (rect.top + rect.height / 2)) / (rect.height / 2)));
+          this.pointer.x += (nx - this.pointer.x) * 0.08; // 平滑化して滑らかに追従
+          this.pointer.y += (ny - this.pointer.y) * 0.08;
+          this.points.rotation.y = this.pointer.x * 0.5; // 左右の傾き
+          this.points.rotation.x = this.pointer.y * 0.3; // 上下の傾き
+          this.points.position.x = this.pointer.x * 0.05; // わずかに平行移動も
+          this.points.position.y = -this.pointer.y * 0.05;
+
+          r.render(this.scene, this.camera);
+        }
+      } else {
+        // カード枠が無い場合（index.html のラベル等）は従来どおり全画面表示
+        r.setViewport(0, 0, this.width, this.height);
+        this.camera.aspect = this.width / this.height;
+        this.camera.updateProjectionMatrix();
+        r.render(this.scene, this.camera);
+      }
+    }
+
+    // 4. 次フレームを予約
     requestAnimationFrame(this.render.bind(this));
   }
 }

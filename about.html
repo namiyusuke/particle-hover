@@ -14,19 +14,31 @@
       body {
         width: 100%;
       }
-      /* パーティクル背景（メンバー一覧の後ろに固定表示） */
+      /* パーティクル用の固定キャンバス。透明で、ホバー中のカード内だけに描画される */
       #container {
         position: fixed;
         inset: 0;
         width: 100vw;
         height: 100vh;
-        z-index: 0;
+        z-index: 3; /* コンテンツ(1)・写真粒子(2)より前面に重ねる */
         pointer-events: none; /* スクロール・ホバーを下の一覧に通す */
       }
       /* コンテンツはパーティクルより前面に */
       .l-main-wrapper {
         position: relative;
         z-index: 1;
+      }
+      /* ホバー中は元写真を隠し、粒子キャンバス（photoParticles.js）に置き換える */
+      .p-mem-list-item.dissolving .img > .img-wrapper {
+        opacity: 0;
+      }
+      .p-mem-list-item .photo-particles {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 2;
       }
       /* パーティクルの上に重ねるテキストメニュー */
       #labels {
@@ -2209,17 +2221,18 @@ body.-top-hover .p-work-next {
     position: relative;
     top: 0;
     left: 0;
-    width: calc(var(--whiteGrid) * 2 * 1 + var(--redGrid) * 3 * 1);
-    height: calc((var(--whiteGrid) * 2 * 1 + var(--redGrid) * 3 * 1) * 1.25);
+    width: calc(var(--whiteGrid) * 4 * 1 + var(--redGrid) * 5 * 1);
+    height: calc((var(--whiteGrid) * 4 * 1 + var(--redGrid) * 5 * 1) * 1.25);
+    flex-shrink: 0; /* flex で横に縮められて画像が切れる(マスクされる)のを防ぐ */
     border-radius: 4px;
     overflow: hidden;
-    background-color: #fff
+    background-color: transparent /* 黒背景。ホバーで写真が消えると黒地になり白い粒子が映える */
 }
 
 @media all and (max-width: 950px) {
     .p-mem-list-item .img {
-        width:calc(var(--whiteGrid) * 3 * 1 + var(--redGrid) * 4 * 1);
-        height: calc((var(--whiteGrid) * 3 * 1 + var(--redGrid) * 4 * 1) * 1.25);
+        width:calc(var(--whiteGrid) * 5 * 1 + var(--redGrid) * 6 * 1);
+        height: calc((var(--whiteGrid) * 5 * 1 + var(--redGrid) * 6 * 1) * 1.25);
         background-color: transparent
     }
 }
@@ -2237,14 +2250,14 @@ body.-top-hover .p-work-next {
     position: absolute;
     top: 0;
     left: 0;
-    width: calc(var(--whiteGrid) * 2 * 1 + var(--redGrid) * 3 * 1);
-    height: calc((var(--whiteGrid) * 2 * 1 + var(--redGrid) * 3 * 1) * 1.25)
+    width: calc(var(--whiteGrid) * 4 * 1 + var(--redGrid) * 5 * 1);
+    height: calc((var(--whiteGrid) * 4 * 1 + var(--redGrid) * 5 * 1) * 1.25)
 }
 
 @media all and (max-width: 950px) {
     .p-mem-list-item .img>.img-wrapper>.inner {
-        width:calc(var(--whiteGrid) * 3 * 1 + var(--redGrid) * 4 * 1);
-        height: calc((var(--whiteGrid) * 3 * 1 + var(--redGrid) * 4 * 1) * 1.25)
+        width:calc(var(--whiteGrid) * 5 * 1 + var(--redGrid) * 6 * 1);
+        height: calc((var(--whiteGrid) * 5 * 1 + var(--redGrid) * 6 * 1) * 1.25)
     }
 }
 
@@ -3240,10 +3253,10 @@ body.-top-hover .p-mem-detail-text>.text {
 }
     </style>
   </head>
-  <body class="-loaded">
+  <body class="-loaded -dark">
     <div id="container"></div>
 <main class="p-mem -start" data-barba="container" data-barba-namespace="mem">
-    <div class="l-main-wrapper">
+    <div class="l-main-wrapper -dark">
       <header class="l-header">
         <a class="logo" href="/" aria-label="to top page">
           <svg class="s-fit" width="141" height="40" viewBox="0 0 141 40" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -3551,5 +3564,6 @@ Hara</div>
 </footer>    </div>
   </main>
   <script type="module" src="/main.js"></script>
+  <script type="module" src="/photoParticles.js"></script>
   </body>
 </html>
