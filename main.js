@@ -139,6 +139,7 @@ export default class Sketch {
     // ホバー中の対象。activeEl=ホバー要素 / activeBox=描画を収めるカードの枠（無ければ全画面）
     this.activeEl = null;
     this.activeBox = null;
+    this.activeReady = false; // 対象モデルの読み込みが済み、描画してよいか
 
     // マウス位置（ホバー方向にモデルを少し傾けるため）
     this.mouseX = 0;
@@ -169,16 +170,11 @@ export default class Sketch {
 
   // アセット読み込み完了を待ってから初期化する
   async init() {
-    // 初期位置=球。ホバーで各 GLB モデルの表面へ切り替わる。
+    // 初期位置=球。GLB モデルはホバー時に遅延読み込みする（起動時は待たせない）。
     this.points1 = spherePoints(TEXTURE_WIDTH);
-    // 全 GLB の点群を並列生成し、shape 名 → 点群 のマップにする
-    const modelPoints = await Promise.all(MODELS.map((m) => glbPoints(m.url, TEXTURE_WIDTH)));
-    this.modelPoints = {};
-    MODELS.forEach((m, i) => {
-      this.modelPoints[m.shape] = modelPoints[i];
-    });
-    // 初期ターゲット（クリック切り替え用の B）に使う最初のモデル
-    this.points2 = modelPoints[0];
+    this.points2 = this.points1; // 初期ターゲット用のダミー（起動時に GLB を読まないため球で代用）
+    this.modelPoints = {}; // shape 名 → 点群。読み込めたものからキャッシュ
+    this.modelLoading = {}; // shape 名 → 読み込み中の Promise（多重読み込み防止）
 
     await this.loadAssets();
     this.addObjects();
@@ -187,6 +183,57 @@ export default class Sketch {
     this.setupResize();
     this.setupTextHover();
     this.render();
+    this.prefetchModels(); // 背景で順次先読みし、後のホバーを即時化
+  }
+
+  // 指定 shape の GLB 点群を必要になった時だけ読み込む（キャッシュ＆多重防止）
+  loadModel(shape) {
+    if (this.modelPoints[shape]) return Promise.resolve(this.modelPoints[shape]);
+    if (!this.modelLoading[shape]) {
+      const m = MODELS.find((x) => x.shape === shape);
+      if (!m) return Promise.reject(new Error("unknown shape: " + shape));
+      this.modelLoading[shape] = glbPoints(m.url, TEXTURE_WIDTH)
+        .then((pts) => {
+          this.modelPoints[shape] = pts;
+          return pts;
+        })
+        .catch((e) => {
+          this.modelLoading[shape] = null; // 失敗したら再試行できるように解放
+          throw e;
+        });
+    }
+    return this.modelLoading[shape];
+  }
+
+  // 全モデルを1体ずつ背景で先読み（帯域を占有しすぎないよう直列）
+  async prefetchModels() {
+    for (const m of MODELS) {
+      try {
+        await this.loadModel(m.shape);
+      } catch (e) {
+        /* 個別の失敗は無視して次へ */
+      }
+    }
+  }
+
+  // カード内にローディング表示（スピナー）を出し入れする
+  setLoading(el, on) {
+    const box = el.querySelector(".img");
+    if (!box) return;
+    let sp = box.querySelector(".particle-loading");
+    if (on && !sp) {
+      sp = document.createElement("div");
+      sp.className = "particle-loading";
+      box.appendChild(sp);
+    } else if (!on && sp) {
+      sp.remove();
+    }
+  }
+
+  // 動的ターゲットを指定点群に更新して、そこへパーティクルを引き寄せる
+  showModel(points) {
+    fillPositionTexture(this.dynamicTarget, points);
+    this.setTarget(this.dynamicTarget);
   }
 
   // シミュレーションの引き寄せ先テクスチャを差し替える
@@ -194,35 +241,48 @@ export default class Sketch {
     this.velocityUniforms["uTarget"].value = texture;
   }
 
-  // 各テキストに形状(点群)を紐づけ、ホバーでその形状にパーティクルを切り替える
+  // 各カードにホバーで、その shape の GLB モデルを（遅延読み込みして）表示する
   setupTextHover() {
-    // ラベル名 → 点群。各 GLB モデルに対応する。
-    const shapes = {
-      ...this.modelPoints, // 全 GLB（init で読み込み済み）
-    };
-
     // index.html の .word ラベルと about.html のメンバー一覧、両方の data-shape に対応
     const words = document.querySelectorAll("[data-shape]");
     words.forEach((el) => {
-      const points = shapes[el.dataset.shape];
-      if (!points) return;
+      const shape = el.dataset.shape;
 
       el.addEventListener("mouseenter", () => {
-        fillPositionTexture(this.dynamicTarget, points); // 動的ターゲットを紐づけ形状に更新
-        this.setTarget(this.dynamicTarget);
         this.activeEl = el;
         this.activeBox = el.querySelector(".img"); // カード内の写真枠。無ければ全画面表示
         words.forEach((w) => w.classList.remove("active"));
         el.classList.add("active"); // 写真をフェードアウト（CSS 側）
+
+        const points = this.modelPoints[shape];
+        if (points) {
+          this.showModel(points); // 読み込み済みなら即表示
+          this.activeReady = true;
+        } else {
+          // 未読み込み: スピナーを出し、読めたらまだホバー中なら表示
+          this.activeReady = false;
+          this.setLoading(el, true);
+          this.loadModel(shape)
+            .then((pts) => {
+              this.setLoading(el, false);
+              if (this.activeEl === el) {
+                this.showModel(pts);
+                this.activeReady = true;
+              }
+            })
+            .catch(() => this.setLoading(el, false));
+        }
       });
 
-      // ホバーを外したら写真を戻し、パーティクルも待機状態（球）へ戻す
+      // ホバーを外したら写真を戻し、描画を止める
       el.addEventListener("mouseleave", () => {
         el.classList.remove("active");
+        this.setLoading(el, false);
         this.setTarget(this.baseTarget);
         if (this.activeEl === el) {
           this.activeEl = null; // 何もホバーしていない間は描画しない（背景を消す）
           this.activeBox = null;
+          this.activeReady = false;
         }
       });
     });
@@ -392,7 +452,7 @@ export default class Sketch {
     r.setScissorTest(false);
     r.clear();
 
-    if (this.activeEl) {
+    if (this.activeEl && this.activeReady) {
       if (this.activeBox) {
         // カードの写真枠だけに切り抜いて描画（＝カードの中にパーティクルが出る）
         const rect = this.activeBox.getBoundingClientRect();
