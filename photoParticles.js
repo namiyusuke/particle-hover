@@ -19,6 +19,8 @@ const RISE = 26; // 上方向へのバイアス(px)。ふわっと舞い上が�
 const GRAVITY = 16; // 落下量(px)。lp^2 で効かせる
 const MARGIN = 160; // カード枠の外へ粒が飛べる余白(px)。描画領域をこのぶん広げる
 const RADIUS = 4; // 写真の角丸半径(px)。CSS の .p-mem-list-item .img と一致させる
+const SWIRL_MAX = 3.2; // 渦の最大量(rad)。カードごとに ±この範囲で散り方を変える
+const DELAY_MAX = 0.14; // 粒ごとの散り始めの遅れの最大(0〜1)。大きいほど散りがバラつく
 
 const vertexShader = /* glsl */ `
   attribute vec2 aVel;    // 散る方向・速度(px)
@@ -29,9 +31,16 @@ const vertexShader = /* glsl */ `
   uniform float uProgress; // 0=写真そのまま, 1=完全に散った
   uniform float uSize;     // 粒の基本サイズ(デバイスpx)
   uniform float uGravity;
+  uniform float uSwirl;    // 渦の強さ・向き（カードごとに異なる＝散り方が変わる）
 
   varying vec3 vColor;
   varying float vAlpha;
+
+  // 2D 回転行列（glsl-rotation 相当）
+  mat2 rot2d(float a) {
+    float s = sin(a), c = cos(a);
+    return mat2(c, -s, s, c);
+  }
 
   void main() {
     // delay を考慮した各粒子の進行度 0〜1
@@ -42,18 +51,23 @@ const vertexShader = /* glsl */ `
     // 戻りは逆再生で着地が緩やか＝カクつき(ガタッ)を無くす。
     float move = lp * lp;
 
+    // 散る方向を渦状に回転（散るほど回転を強める）。uSwirl がカードごとに違うので
+    // 散らばり方（渦の巻き・向き）がホバーするカードごとに変わる。
+    vec2 disp = rot2d(uSwirl * move) * aVel * move;
+
     vec3 pos = position;
-    pos.x += aVel.x * move;
-    pos.y += aVel.y * move + uGravity * move * move; // 重力で落ちる
+    pos.x += disp.x;
+    pos.y += disp.y + uGravity * move * move; // 重力で落ちる
 
     // 散るほど 元色 → 白黒 へ寄せる
     vColor = mix(aColor, vec3(aGray), lp);
-    vAlpha = 1.0 - lp; // 散り切るほど透明
+    // 散っている間は粒を見せ（＝飛び出した粒がしっかり出る）、散り切る終盤だけ消す。
+    vAlpha = smoothstep(1.0, 0.2, lp);
 
     vec4 mv = modelViewMatrix * vec4(pos, 1.0);
     gl_Position = projectionMatrix * mv;
     // 散るにつれ少し大きく＝弾けて広がる印象
-    gl_PointSize = uSize * (1.0 + lp * 0.6);
+    gl_PointSize = uSize * (1.0 + lp * 0.9);
   }
 `;
 
@@ -222,14 +236,15 @@ class PhotoDissolve {
         const g = data[i + 1];
         const b = data[i + 2];
         const ang = Math.random() * Math.PI * 2;
-        const spd = BURST_MIN + Math.random() * BURST_RANGE;
+        // 速度分布の下限を底上げ（sqrt で低速側を減らす）＝ほとんど動かない“遅い粒”を無くす
+        const spd = BURST_MIN + Math.sqrt(Math.random()) * BURST_RANGE;
 
         homes[k * 3] = x;
         homes[k * 3 + 1] = y;
         // 散る方向。y は上方向へバイアス（画面座標は下向き＋なので負で上）
         vels[k * 2] = Math.cos(ang) * spd;
         vels[k * 2 + 1] = Math.sin(ang) * spd - RISE;
-        delays[k] = Math.random() * 0.35;
+        delays[k] = Math.random() * DELAY_MAX;
         colors[k * 3] = r / 255;
         colors[k * 3 + 1] = g / 255;
         colors[k * 3 + 2] = b / 255;
@@ -254,6 +269,8 @@ class PhotoDissolve {
         // 粒サイズ。グリッド(STEP)を少し上回らせて、静止時に隙間なく写真を覆う
         uSize: { value: STEP * dpr() * 1.8 },
         uGravity: { value: GRAVITY },
+        // カードごとに固有の渦。散らばり方をホバーするカードごとに変える
+        uSwirl: { value: (Math.random() * 2 - 1) * SWIRL_MAX },
       },
       vertexShader,
       fragmentShader,
