@@ -432,10 +432,15 @@ function runLoader(instances) {
   `;
   document.head.appendChild(style);
 
-  const overlay = document.createElement("div");
-  overlay.className = "pp-loader";
-  overlay.innerHTML = '<div class="pp-loader__bar"><div class="pp-loader__fill"></div></div>';
-  document.body.appendChild(overlay);
+  // FOUC 回避のため HTML に静的に置いたローダーを使う（最初の描画から黒幕で覆う）。
+  // 無ければ動的に生成（保険）。
+  let overlay = document.querySelector(".pp-loader");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.className = "pp-loader";
+    overlay.innerHTML = '<div class="pp-loader__bar"><div class="pp-loader__fill"></div></div>';
+    document.body.appendChild(overlay);
+  }
   const fill = overlay.querySelector(".pp-loader__fill");
 
   // 演出タイムライン（急ぎすぎないよう各フェーズに時間を確保）

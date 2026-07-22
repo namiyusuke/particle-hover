@@ -3278,6 +3278,12 @@ body.-top-hover .p-mem-detail-text>.text {
     </style>
   </head>
   <body class="-loaded -dark">
+    <!-- ローディング画面（静的に配置し、最初の描画から本体を覆ってFOUCを防ぐ）。photoParticles.js が進捗を駆動して消す -->
+    <div class="pp-loader" style="position:fixed;inset:0;z-index:2147483647;background:#000;display:flex;align-items:center;justify-content:center;transition:opacity .6s ease;">
+      <div class="pp-loader__bar" style="position:relative;width:min(30vw,220px);height:12px;background:rgba(255,255,255,.14);overflow:hidden;border-radius:2px;">
+        <div class="pp-loader__fill" style="position:absolute;inset:0;transform-origin:left center;transform:scaleX(0);background:#fff;will-change:transform,opacity;transition:transform .35s ease-out;"></div>
+      </div>
+    </div>
     <div id="container"></div>
 <main class="p-mem -start" data-barba="container" data-barba-namespace="mem">
     <div class="l-main-wrapper -dark">
