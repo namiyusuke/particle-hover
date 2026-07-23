@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>点群ベイク（使い捨てツール）</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; line-height: 1.7; }
+      button { font-size: 1rem; padding: 0.6rem 1.4rem; cursor: pointer; }
+      button:disabled { opacity: 0.5; cursor: default; }
+      pre { background: #111; color: #6f6; padding: 1rem; border-radius: 8px; min-height: 8rem; white-space: pre-wrap; }
+      ol { max-width: 640px; }
+      code { background: #eee; padding: 0.1em 0.35em; border-radius: 4px; }
+      #links { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0; }
+      a.dl { display: inline-block; padding: 0.5rem 1rem; background: #0b6; color: #fff; border-radius: 6px; text-decoration: none; }
+    </style>
+  </head>
+  <body>
+    <h1>点群ベイク</h1>
+    <ol>
+      <li>「ベイク実行」を押すと10モデルを計算し、下に <code>⬇ asano.bin</code> 〜 <code>⬇ yamamoto.bin</code> のボタンが並びます（各約732KB）。</li>
+      <li>各ボタンを1つずつ押して保存（または「全部ダウンロード」→ 出た許可プロンプトで「複数ファイルを許可」）。</li>
+      <li>保存した 10 個の .bin を <code>public/points/</code> に移動します。</li>
+      <li>トップページ(<code>/</code>)を開いてホバー表示を確認します。</li>
+      <li>問題なければ <code>bake.html</code> / <code>bake.js</code> を削除し、<code>public/*.glb</code> も配信から外せます。</li>
+    </ol>
+    <p><button type="button" id="run">ベイク実行</button> <button type="button" id="all">全部ダウンロード</button></p>
+    <div id="links"></div>
+    <pre id="log"></pre>
+    <script type="module" src="/bake.js"></script>
+  </body>
+</html>

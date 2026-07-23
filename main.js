@@ -3,9 +3,6 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import vertex from "./shader/vertex.glsl";
 import fragment from "./shader/fragment.glsl";
 import { GPUComputationRenderer } from "three/examples/jsm/misc/GPUComputationRenderer.js";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { MeshSurfaceSampler } from "three/examples/jsm/math/MeshSurfaceSampler.js";
-import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import fragmentShaderVelocity from "./shader/simFragmentVelocity.glsl";
 import fragmentShaderPosition from "./shader/simFragmentPosition.glsl";
 import PoissonDiskSampling from "poisson-disk-sampling";
@@ -14,18 +11,19 @@ const t2 = "/2.png";
 let COUNT = 250;
 let TEXTURE_WIDTH = COUNT ** 2;
 
-// public/ 内の全 GLB。label が index.html の .word と、shape が data-shape と対応する。
+// public/points/ 内の事前ベイク済み点群(.bin)。label が index.html の .word と、
+// shape が data-shape と対応する。.bin は bake.html で GLB から一度だけ生成する。
 const MODELS = [
-  { shape: "asano", label: "ASANO", url: "/asano.glb" },
-  { shape: "daijima", label: "DAIJIMA", url: "/daijima.glb" },
-  { shape: "funahashi", label: "FUNAHASHI", url: "/funahashi.glb" },
-  { shape: "hara", label: "HARA", url: "/hara.glb" },
-  { shape: "hasegawa", label: "HASEGAWA", url: "/hasegawa.glb" },
-  { shape: "ikeda", label: "IKEDA", url: "/ikeda.glb" },
-  { shape: "minato", label: "MINATO", url: "/minato.glb" },
-  { shape: "nakagawa", label: "NAKAGAWA", url: "/nakagawa.glb" },
-  { shape: "nenoki", label: "NENOKI", url: "/nenoki.glb" },
-  { shape: "yamamoto", label: "YAMAMOTO", url: "/yamamoto.glb" },
+  { shape: "asano", label: "ASANO", url: "/points/asano.bin" },
+  { shape: "daijima", label: "DAIJIMA", url: "/points/daijima.bin" },
+  { shape: "funahashi", label: "FUNAHASHI", url: "/points/funahashi.bin" },
+  { shape: "hara", label: "HARA", url: "/points/hara.bin" },
+  { shape: "hasegawa", label: "HASEGAWA", url: "/points/hasegawa.bin" },
+  { shape: "ikeda", label: "IKEDA", url: "/points/ikeda.bin" },
+  { shape: "minato", label: "MINATO", url: "/points/minato.bin" },
+  { shape: "nakagawa", label: "NAKAGAWA", url: "/points/nakagawa.bin" },
+  { shape: "nenoki", label: "NENOKI", url: "/points/nenoki.bin" },
+  { shape: "yamamoto", label: "YAMAMOTO", url: "/points/yamamoto.bin" },
 ];
 
 // 画像を読み込んで HTMLImageElement を返す
@@ -80,41 +78,17 @@ function spherePoints(count, radius = 0.5) {
   return arr;
 }
 
-// GLB(glTF)のメッシュ表面から点群(Float32Array [x,y,z, ...])を生成する。
-// モデル内の全メッシュをワールド変換して結合し、表面積に応じて一様サンプリングする。
-async function glbPoints(url, count) {
-  const gltf = await new GLTFLoader().loadAsync(url);
-  gltf.scene.updateMatrixWorld(true);
-
-  // 各メッシュを position 属性だけに絞り、ワールド座標へ展開して結合
-  const geoms = [];
-  gltf.scene.traverse((child) => {
-    if (!child.isMesh) return;
-    const g = child.geometry.clone().applyMatrix4(child.matrixWorld).toNonIndexed();
-    const only = new THREE.BufferGeometry();
-    only.setAttribute("position", g.getAttribute("position"));
-    geoms.push(only);
-  });
-  if (geoms.length === 0) throw new Error("GLB にメッシュが見つかりません: " + url);
-  const merged = geoms.length === 1 ? geoms[0] : mergeGeometries(geoms);
-
-  // 中心を原点へ、最大辺が 1.0 になるよう正規化（他の立体と同じスケール感に揃える）
-  merged.computeBoundingBox();
-  const center = new THREE.Vector3();
-  const size = new THREE.Vector3();
-  merged.boundingBox.getCenter(center);
-  merged.boundingBox.getSize(size);
-  const scale = 1.0 / Math.max(size.x, size.y, size.z);
-
-  // 面積重み付きサンプリング: 大きい面ほど多くの点が乗る
-  const sampler = new MeshSurfaceSampler(new THREE.Mesh(merged)).build();
-  const arr = new Float32Array(count * 3);
-  const p = new THREE.Vector3();
-  for (let i = 0; i < count; i++) {
-    sampler.sample(p);
-    arr[i * 3 + 0] = (p.x - center.x) * scale;
-    arr[i * 3 + 1] = (p.y - center.y) * scale;
-    arr[i * 3 + 2] = (p.z - center.z) * scale;
+// 事前ベイク済みの点群(.bin)を読み込む。中身は Float32 の生バイナリ [x,y,z, x,y,z, ...]。
+// GLB のダウンロード・パース・サンプリングは bake.html で一度だけ済ませてあるので、
+// 実行時はこの fetch だけ。メインスレッドを止めず、待ち時間もほぼゼロになる。
+async function loadPoints(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`点群の取得に失敗: ${url} (${res.status})`);
+  const arr = new Float32Array(await res.arrayBuffer());
+  // 点数はテクスチャサイズ(COUNT×COUNT)と一致している必要がある。
+  // COUNT を変えたら bake.html で再ベイクすること。
+  if (arr.length !== TEXTURE_WIDTH * 3) {
+    throw new Error(`点数不一致 ${url}: ${arr.length / 3} 点 (期待値 ${TEXTURE_WIDTH})。COUNT変更後は再ベイクが必要。`);
   }
   return arr;
 }
@@ -192,7 +166,7 @@ export default class Sketch {
     if (!this.modelLoading[shape]) {
       const m = MODELS.find((x) => x.shape === shape);
       if (!m) return Promise.reject(new Error("unknown shape: " + shape));
-      this.modelLoading[shape] = glbPoints(m.url, TEXTURE_WIDTH)
+      this.modelLoading[shape] = loadPoints(m.url)
         .then((pts) => {
           this.modelPoints[shape] = pts;
           return pts;
