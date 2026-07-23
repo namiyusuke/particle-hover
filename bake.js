@@ -19,7 +19,7 @@ import { MeshSurfaceSampler } from "three/examples/jsm/math/MeshSurfaceSampler.j
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
 // ↓ main.js と同じ値にすること
-const COUNT = 250;
+const COUNT = 200;
 const TEXTURE_WIDTH = COUNT ** 2;
 
 const MODELS = [

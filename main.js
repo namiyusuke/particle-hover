@@ -8,7 +8,7 @@ import fragmentShaderPosition from "./shader/simFragmentPosition.glsl";
 import PoissonDiskSampling from "poisson-disk-sampling";
 const t1 = "/1.jpg";
 const t2 = "/2.png";
-let COUNT = 250;
+let COUNT = 200;
 let TEXTURE_WIDTH = COUNT ** 2;
 
 // public/points/ 内の事前ベイク済み点群(.bin)。label が index.html の .word と、
@@ -181,13 +181,21 @@ export default class Sketch {
 
   // 全モデルを1体ずつ背景で先読み（帯域を占有しすぎないよう直列）
   async prefetchModels() {
-    for (const m of MODELS) {
-      try {
-        await this.loadModel(m.shape);
-      } catch (e) {
-        /* 個別の失敗は無視して次へ */
+    // 直列だとリスト後半のモデルが準備完了になるまで待たされる。
+    // 一定数を並列で読み、回線を使い切って全モデルを早く揃える。
+    const CONCURRENCY = 4; // 回線を飽和させすぎない程度の同時数
+    const queue = [...MODELS];
+    const worker = async () => {
+      while (queue.length) {
+        const m = queue.shift();
+        try {
+          await this.loadModel(m.shape);
+        } catch (e) {
+          /* 個別の失敗は無視して次へ */
+        }
       }
-    }
+    };
+    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
   }
 
   // カード内にローディング表示（スピナー）を出し入れする
